@@ -22,3 +22,11 @@ Yahoo is registered automatically. No environment variable is required.
 4. Use **Use as primary** or **Use as fallback** on the Yahoo card when you want it earlier in the chain. Use the enable checkbox or **Disconnect** to turn it off. **Test Connection** requests `AAPL.US`.
 
 Quote, chart, watchlist, and compare freshness lines show the provider that actually returned the data (`Yahoo Finance`, `Longbridge`, or `Massive (Polygon.io)`), including when the data is delayed.
+
+## Quote day-change integrity
+
+The quote adapter requests one month of daily bars and anchors the quote session to `regularMarketTime` in `exchangeTimezoneName`. It uses the preceding session's **Close**, never a range baseline (`chartPreviousClose`), dividend-adjusted `Adj Close`, the host's current date, or the current day's partial close. Duplicate daily rows are grouped by exchange date; null slots keep their original alignment.
+
+When the preceding weekday bar, its close, the quote timestamp, or the exchange timezone cannot be verified, the quote is unavailable. Folio currently has no authoritative US holiday calendar: a holiday gap is conservatively unavailable rather than silently using an older close. Any split returned at or after the preceding session makes the quote unavailable, including a split dated after the quote: historical bars and the latest regular price may update to a new basis asynchronously. Historical split-adjusted closes are never divided by the split ratio again. These safeguards favor an explicit gap over a fabricated daily change or 0%.
+
+Provider failures in the watchlist render **Quote unavailable**, with no implicit sample-price substitution. Successful rows retain their own provider and market timestamp in the aggregate freshness line.
