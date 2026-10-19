@@ -74,6 +74,43 @@ describe('splitMarkdownBlocks (#28)', () => {
     expect(splitMarkdownBlocks('para\n\n    code block')).toEqual(['para', '    code block']);
   });
 
+  it('keeps an indented code block one block across internal blank lines', () => {
+    // An indented code block runs across blank lines in CommonMark, so the
+    // whole-document render shows one <pre>. A boundary at the blank line
+    // would render the tail as a second <pre> while streaming (#324).
+    expect(splitMarkdownBlocks('    const a = 1;\n\n    const b = 2;')).toEqual([
+      '    const a = 1;\n\n    const b = 2;',
+    ]);
+    // A tab counts as four columns of indentation.
+    expect(splitMarkdownBlocks('\tcode1\n\n\tcode2')).toEqual(['\tcode1\n\n\tcode2']);
+    // Any number of blank lines between indented lines stays inside the block.
+    expect(splitMarkdownBlocks('    code1\n\n\n\n    code2')).toEqual(['    code1\n\n\n\n    code2']);
+  });
+
+  it('closes an indented code block at the first non-indented line', () => {
+    expect(splitMarkdownBlocks('    const a = 1;\n\nconst b = 2;')).toEqual([
+      '    const a = 1;',
+      'const b = 2;',
+    ]);
+    // Headings, list markers, blockquotes and fences all close it too.
+    expect(splitMarkdownBlocks('    const a = 1;\n\n## Heading')).toEqual([
+      '    const a = 1;',
+      '## Heading',
+    ]);
+    expect(splitMarkdownBlocks('    const a = 1;\n\n- item')).toEqual(['    const a = 1;', '- item']);
+    expect(splitMarkdownBlocks('    const a = 1;\n\n> quote')).toEqual(['    const a = 1;', '> quote']);
+    expect(splitMarkdownBlocks('    const a = 1;\n\n```\nx\n```')).toEqual(['    const a = 1;', '```\nx\n```']);
+  });
+
+  it('does not treat a lazy paragraph continuation as indented code', () => {
+    // Without a blank line above it the indented line continues the paragraph,
+    // so the following blank line still separates paragraph from code block.
+    expect(splitMarkdownBlocks('para text\n    more text\n\n    code block')).toEqual([
+      'para text\n    more text',
+      '    code block',
+    ]);
+  });
+
   it('does not split when the document uses link reference definitions', () => {
     const doc = 'See [the report][ref].\n\n[ref]: https://example.com/report';
     expect(splitMarkdownBlocks(doc)).toEqual([doc]);

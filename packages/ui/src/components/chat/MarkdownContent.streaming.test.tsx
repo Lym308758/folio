@@ -221,6 +221,28 @@ describe('streamed Markdown block rendering (#28)', () => {
     await unmount(root);
   });
 
+  it('keeps an indented code block one pre across an internal blank line', async () => {
+    // CommonMark runs an indented code block across blank lines, so the
+    // whole-document render shows a single <pre>. A block boundary at the
+    // blank line renders the tail as a second <pre> while streaming (#324).
+    const content = '    const a = 1;\n\n    const b = 2;';
+    const { container, root } = await mountStreaming(content);
+    const { container: staticContainer, root: staticRoot } = await mountStatic(content);
+
+    expect(container.querySelectorAll('pre')).toHaveLength(1);
+    expect(container.querySelector('pre code')?.textContent).toBe('const a = 1;\n\nconst b = 2;');
+    // The streamed render must stay structurally identical to the static one:
+    // same number of code blocks, same code text, same overall text.
+    expect(container.querySelectorAll('pre')).toHaveLength(staticContainer.querySelectorAll('pre').length);
+    expect(container.querySelector('pre code')?.textContent).toBe(
+      staticContainer.querySelector('pre code')?.textContent,
+    );
+    expect(container.textContent).toBe(staticContainer.textContent);
+
+    await unmount(root);
+    await unmount(staticRoot);
+  });
+
   it('keeps a loose list one list across blank lines', async () => {
     const fixture = fixtureNamed('loose list across a blank line');
     const { container, root } = await mountStreaming(fixture.partial);

@@ -8,11 +8,12 @@
  *
  * Splitting is deliberately conservative: a boundary is only taken at a blank
  * line whose following line cannot continue the block above it. Anything that
- * could change meaning when separated — an open fence, a loose list, a
- * multi-line blockquote, a document-scoped link reference, a raw-HTML block —
- * is kept whole (or the whole document is returned as one block), at the cost
- * of a larger tail. The renderer falls back to whole-document rendering once
- * the stream completes, so the final DOM never depends on these heuristics.
+ * could change meaning when separated — an open fence, an indented code block,
+ * a loose list, a multi-line blockquote, a document-scoped link reference, a
+ * raw-HTML block — is kept whole (or the whole document is returned as one
+ * block), at the cost of a larger tail. The renderer falls back to
+ * whole-document rendering once the stream completes, so the final DOM never
+ * depends on these heuristics.
  */
 
 const FENCE_OPEN = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/;
@@ -30,6 +31,11 @@ const LINK_REFERENCE_DEFINITION = /^[ \t]{0,3}\[[^\]]+\]:/;
 const HTML_BLOCK_LINE = /^[ \t]{0,3}<[a-zA-Z!/?]/;
 const BLANK_LINE = /^[ \t]*\r?$/;
 const INDENTED_CONTINUATION = /^[ \t]+\S/;
+// An indented code block starts at a line indented four columns or more (a tab
+// counts as four) that does not lazily continue a paragraph, and runs until
+// the first non-indented non-blank line. Blank lines inside it belong to the
+// code block, so a boundary there would render the tail as a second <pre>.
+const CODE_INDENT = /^(?: {4}| {0,3}\t)/;
 
 // `split('\n')` leaves the carriage return on CRLF lines. Strip it only for
 // delimiter detection so the original Markdown bytes reach the renderer
@@ -68,6 +74,10 @@ export function splitMarkdownBlocks(content: string): string[] {
   let fence: { marker: string } | null = null;
   let inList = false;
   let inBlockquote = false;
+  let inIndentedCode = false;
+  // The document start behaves like a blank line: an indented first line opens
+  // a code block instead of continuing anything.
+  let previousLineBlank = true;
 
   const flush = (): void => {
     if (current.length > 0) {
@@ -79,6 +89,11 @@ export function splitMarkdownBlocks(content: string): string[] {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
     const bare = withoutCarriageReturn(line);
+    // Capture the blank-ness of the preceding line before this one overwrites
+    // it: an indented line only opens a code block after a blank line (or
+    // inside one), never as a lazy paragraph continuation.
+    const previousBlank = previousLineBlank;
+    previousLineBlank = BLANK_LINE.test(bare);
 
     // Inside a fence everything is literal until a closing fence of the same
     // marker and at least the opening length arrives — blank lines included.
@@ -111,7 +126,11 @@ export function splitMarkdownBlocks(content: string): string[] {
         !THEMATIC_BREAK.test(nextBare) &&
         (LIST_MARKER.test(nextBare) || INDENTED_CONTINUATION.test(nextBare));
       const continuesBlockquote = inBlockquote && BLOCKQUOTE_LINE.test(nextBare);
-      if (continuesList || continuesBlockquote) {
+      // An indented code block runs across blank lines for as long as the next
+      // non-blank line is indented too; splitting there would render one code
+      // block as two <pre> elements.
+      const continuesCode = inIndentedCode && CODE_INDENT.test(nextBare);
+      if (continuesList || continuesBlockquote || continuesCode) {
         // Keep the blank line inside the block: loose lists and multi-line
         // blockquotes are one construct even across a blank line.
         current.push(line);
@@ -119,8 +138,19 @@ export function splitMarkdownBlocks(content: string): string[] {
         flush();
         inList = false;
         inBlockquote = false;
+        inIndentedCode = false;
       }
       continue;
+    }
+
+    // Track indented code blocks. An indented line opens one after a blank
+    // line or inside an existing block; without that it lazily continues the
+    // paragraph above and must not start code. Any non-indented non-blank line
+    // closes the block, matching CommonMark.
+    if (CODE_INDENT.test(bare)) {
+      if (previousBlank || inIndentedCode) inIndentedCode = true;
+    } else {
+      inIndentedCode = false;
     }
 
     const open = bare.match(FENCE_OPEN);
